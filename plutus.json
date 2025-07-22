@@ -1,0 +1,100 @@
+{
+  "preamble": {
+    "title": "avilsmeier/waifus",
+    "description": "Aiken contracts for project 'avilsmeier/waifus'",
+    "version": "0.1",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.17+c3a7fba"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "mint_burn.main.mint",
+      "redeemer": {
+        "title": "datum",
+        "schema": {
+          "$ref": "#/definitions/mint_burn~1CompanionDatum"
+        }
+      },
+      "compiledCode": "59024801010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400130080024888966002600460106ea800e264b300130033009375400b132323259800980880144c8cc004004dd6180880211192cc00400a264653001230020019180b180b980b980b980b980b980b980b980b800c88c8cc00400400c896600200314a115980099b8f375c603200200714a3133002002301a001405080b9222598009807180a1baa00c8994c004c004006294260086eb0c064c058dd5008a444b3001301230183754003132598009809980c9baa0018acc004cdc398021bac301d301a375402a900144cc018dd61803980d1baa301d301a37540246eb8c074c068dd5000c5282030801a030301c30193754003002405c2259800800c52000899b8048008cc008008c06c00501844cc89660026020602c6ea800a264b30013011301737540031330043758600a60306ea8c06cc060dd50081bae301b3018375400300240586034602e6ea800a00280a8c00cdd6180c180a9baa01014a08098600200244b30010018a60103d87a80008992cc004006266e9520003301530160024bd7044cc00c00c005014180b000a02689919912cc004c03000a26464b30013019002801c590161bae30170013013375400715980099b874800800a26464b30013019002801c590161bae3017001301337540071640448088c040dd500089801180a8019809801202230020028b201c375c601e002601e00260146ea80162c8040dd7180618049baa0038b200e180400098019baa0088a4d1365640041",
+      "hash": "bd1b3da83959cb7ab85b4cf0f44d6b9a76359f8bc90025704cd36923"
+    },
+    {
+      "title": "mint_burn.main.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "59024801010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400130080024888966002600460106ea800e264b300130033009375400b132323259800980880144c8cc004004dd6180880211192cc00400a264653001230020019180b180b980b980b980b980b980b980b980b800c88c8cc00400400c896600200314a115980099b8f375c603200200714a3133002002301a001405080b9222598009807180a1baa00c8994c004c004006294260086eb0c064c058dd5008a444b3001301230183754003132598009809980c9baa0018acc004cdc398021bac301d301a375402a900144cc018dd61803980d1baa301d301a37540246eb8c074c068dd5000c5282030801a030301c30193754003002405c2259800800c52000899b8048008cc008008c06c00501844cc89660026020602c6ea800a264b30013011301737540031330043758600a60306ea8c06cc060dd50081bae301b3018375400300240586034602e6ea800a00280a8c00cdd6180c180a9baa01014a08098600200244b30010018a60103d87a80008992cc004006266e9520003301530160024bd7044cc00c00c005014180b000a02689919912cc004c03000a26464b30013019002801c590161bae30170013013375400715980099b874800800a26464b30013019002801c590161bae3017001301337540071640448088c040dd500089801180a8019809801202230020028b201c375c601e002601e00260146ea80162c8040dd7180618049baa0038b200e180400098019baa0088a4d1365640041",
+      "hash": "bd1b3da83959cb7ab85b4cf0f44d6b9a76359f8bc90025704cd36923"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "dataType": "bytes"
+    },
+    "aiken/crypto/ScriptHash": {
+      "title": "ScriptHash",
+      "dataType": "bytes"
+    },
+    "aiken/crypto/VerificationKeyHash": {
+      "title": "VerificationKeyHash",
+      "dataType": "bytes"
+    },
+    "cardano/address/PaymentCredential": {
+      "title": "PaymentCredential",
+      "description": "A general structure for representing an on-chain `Credential`.\n\n Credentials are always one of two kinds: a direct public/private key\n pair, or a script (native or Plutus).",
+      "anyOf": [
+        {
+          "title": "VerificationKey",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            }
+          ]
+        },
+        {
+          "title": "Script",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": [
+            {
+              "$ref": "#/definitions/aiken~1crypto~1ScriptHash"
+            }
+          ]
+        }
+      ]
+    },
+    "mint_burn/CompanionDatum": {
+      "title": "CompanionDatum",
+      "anyOf": [
+        {
+          "title": "CompanionDatum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "ownership_log",
+              "$ref": "#/definitions/mint_burn~1OwnerLog"
+            },
+            {
+              "title": "dna_hash",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        }
+      ]
+    },
+    "mint_burn/OwnerLog": {
+      "title": "OwnerLog",
+      "dataType": "list",
+      "items": {
+        "$ref": "#/definitions/cardano~1address~1PaymentCredential"
+      }
+    }
+  }
+}
