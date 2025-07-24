@@ -1,9 +1,9 @@
 name = "avilsmeier/waifus"
-version = "0.1"
+version = "1.0"
 compiler = "v1.1.17"
 plutus = "v3"
 license = "Apache-2.0"
-description = "Aiken contracts for project 'avilsmeier/waifus'"
+description = "Aiken contracts for project 'My e-Waifu'"
 
 [repository]
 user = "avilsmeier"
