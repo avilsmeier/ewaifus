@@ -1,253 +1,164 @@
-use aiken/collection/list.{any, head, length, filter, push, has}
-use aiken/collection/dict.{get, keys}
+use aiken/collection/dict.{Dict, get}
+use aiken/collection/list.{any, filter_map, head}
 use cardano/address.{PaymentCredential, VerificationKey}
-use cardano/assets.{to_dict, PolicyId, AssetName}
+use cardano/assets.{AssetName, PolicyId, to_dict}
 use cardano/script_context.{ScriptContext}
-use cardano/transaction.{Datum}
-use aiken/transaction.{InlineDatum}
+use cardano/transaction.{InlineDatum, Input, find_datum, DatumHash}
 
-// Companion metadata validator with transfer, burn, bonding (via NFT or affection), cosmetics, and unbonding
+// Companion metadata validator with transfer, burn, bonding, cosmetic, and unbonding
 
 pub type CompanionDatum {
-  version:         Int,
-  policy_id:       PolicyId,
-  ownership_log:   List<PaymentCredential>,
-  dna_hash:        AssetName,
+  version: Int,
+  policy_id: PolicyId,
+  ownership_log: List<PaymentCredential>,
+  dna_hash: AssetName,
+  dna_ipfs: ByteArray,
+  cosmetics: List<ByteArray>,
+  bonded: Bool,
   affection_score: Int,
   trust_threshold: Int,
-  bonded:          Bool,
-  ipfs_hash:       ByteArray
 }
 
 pub type CompanionRedeemer {
   Transfer(PaymentCredential)
   Burn
   BondingRitual(ByteArray)
-  CosmeticUpgrade(ByteArray, Int)
-  Event(ByteArray, Int)
+  CosmeticUpgrade(ByteArray)
   Unbonding(ByteArray)
 }
 
-fn max_affection() -> Int { 100 }
-fn min_affection() -> Int { 0 }
-fn max_cosmetics_per_tx() -> Int { 4 }
+pub type ModifierMap =
+  Dict<AssetName, Int>
 
-fn cosmetic_policy_id() -> PolicyId {
-  #"3217a73bb393fd45e3d5aafa386d16e314637fcd8feea94839218177"
-}
-
+// Return the most recent owner
 fn current_owner(log: List<PaymentCredential>) -> Option<PaymentCredential> {
   head(log)
 }
 
+// Check that the given credential signed the tx
 fn signed_by(owner: PaymentCredential, ctx: ScriptContext) -> Bool {
   when owner is {
-    VerificationKey(pkh) -> any(ctx.transaction.extra_signatories, fn(x) { x == pkh })
+    VerificationKey(pkh) ->
+      any(ctx.transaction.extra_signatories, fn(x) { x == pkh })
     _ -> False
   }
 }
 
-fn as_companion_datum(datum: Datum) -> Option<CompanionDatum> {
-  when datum is {
-    InlineDatum(d) -> CompanionDatum::deserialize(d)
-    _ -> None
-  }
-}
-
-fn collect_cosmetic_step(inputs, seen) -> List<AssetName> {
-  when inputs is {
-    [] -> seen
-    [x, ..rest] -> {
-      let m = to_dict(x.output.value)
-      let names = when get(m, cosmetic_policy_id()) is {
-        Some(inner) -> keys(inner)
-        _ -> []
+// Check if a specific asset under a policy ID was consumed from inputs
+fn asset_consumed(
+  ctx: ScriptContext,
+  policy: PolicyId,
+  asset: AssetName,
+) -> Bool {
+  any(
+    ctx.transaction.inputs,
+    fn(i) {
+      let m = to_dict(i.output.value)
+      when get(m, policy) is {
+        Some(inner) ->
+          when get(inner, asset) is {
+            Some(q) -> q >= 1
+            _ -> False
+          }
+        _ -> False
       }
-      let updated = filter(names, fn(n) { !has(seen, n) })
-      let next_seen = add_all(updated, seen)
-      collect_cosmetic_step(rest, next_seen)
+    },
+  )
+}
+
+// Ensure transfer is between different verification keys
+fn is_valid_transfer(from: PaymentCredential, to: PaymentCredential) -> Bool {
+  when from is {
+    VerificationKey(a) ->
+      when to is {
+        VerificationKey(b) -> a != b
+        _ -> False
+      }
+    _ -> False
+  }
+}
+
+fn lookup_modifier(
+  ctx: ScriptContext,
+  mod_admin_pid: PolicyId,
+  mod_admin_aname: AssetName,
+  item: AssetName
+) -> Option<Int> {
+  head(filter_map(ctx.transaction.reference_inputs, fn(input: Input) {
+    let val = to_dict(input.output.value)
+
+    when get(val, mod_admin_pid) is {
+      Some(inner) ->
+        when get(inner, mod_admin_aname) is {
+          Some(_) ->
+            when input.output.datum is {
+              InlineDatum(data) ->
+                // Try casting the inline datum into a Dict<AssetName, Int>
+                when data is {
+                  map: Dict<AssetName, Int> -> get(map, item)
+                  _ -> None
+                }
+              _ -> None
+            }
+          _ -> None
+        }
+      _ -> None
     }
-  }
+  }))
 }
 
-fn add_all(xs: List<AssetName>, acc: List<AssetName>) -> List<AssetName> {
-  when xs is {
-    [] -> acc
-    [x, ..rest] -> add_all(rest, push(x, acc))
-  }
-}
 
-fn collect_unique_cosmetic_items(inputs) -> List<AssetName> {
-  collect_cosmetic_step(inputs, [])
-}
+
 
 validator companion_metadata {
   spend(
     datum: Option<CompanionDatum>,
     redeemer: CompanionRedeemer,
     ctx: ScriptContext,
-    _purpose
-  ) -> Bool {
-    let companion_outputs = filter(ctx.transaction.outputs, fn(o) {
-      when as_companion_datum(o.datum) is {
-        Some(_) -> True
-        _ -> False
-      }
-    })
-
+    _purpose,
+  ) {
+    // Must have metadata
     when datum is {
-      Some(d) -> {
+      Some(d) ->
+        // Must be signed by current owner
         when current_owner(d.ownership_log) is {
-          Some(ownerCred) -> {
-            if !signed_by(ownerCred, ctx) {
-              fail
+          Some(ownerCred) ->
+            if not(signed_by(ownerCred, ctx)) {
+              False
             } else {
+              // Handle each redeemer
               when redeemer is {
-                Transfer(newOwner) -> {
-                  if d.bonded {
-                    fail
-                  } else {
-                    when newOwner is {
-                      VerificationKey(npkh) -> when ownerCred is {
-                        VerificationKey(opkh) -> {
-                          if npkh == opkh {
-                            fail
-                          } else {
-                            let consumed = any(ctx.transaction.inputs, fn(i) {
-                              let m = to_dict(i.output.value)
-                              when get(m, d.policy_id) is {
-                                Some(inner) -> when get(inner, d.dna_hash) is { Some(q) -> q >= 1 _ -> False }
-                                _ -> False
-                              }
-                            })
-                            if consumed { True } else { fail }
-                          }
-                        } _ -> fail
-                      } _ -> fail
-                    }
-                  }
-                }
+                // Transfer: only if not bonded
+                Transfer(newOwner) ->
+                  !d.bonded && is_valid_transfer(ownerCred, newOwner) && asset_consumed(
+                    ctx,
+                    d.policy_id,
+                    d.dna_hash,
+                  )
 
-                Burn -> {
-                  let consumed = any(ctx.transaction.inputs, fn(i) {
-                    let m = to_dict(i.output.value)
-                    when get(m, d.policy_id) is {
-                      Some(inner) -> when get(inner, d.dna_hash) is { Some(q) -> q >= 1 _ -> False }
-                      _ -> False
-                    }
-                  })
-                  if consumed { True } else { fail }
-                }
+                // Burn: consume NFT
+                Burn -> asset_consumed(ctx, d.policy_id, d.dna_hash)
 
-                BondingRitual(_) -> {
-                  if d.bonded || length(companion_outputs) != 1 {
-                    fail
-                  } else {
-                    let nft_consumed = any(ctx.transaction.inputs, fn(i) {
-                      let m = to_dict(i.output.value)
-                      when get(m, d.policy_id) is {
-                        Some(inner) -> when get(inner, d.dna_hash) is { Some(q) -> q >= 1 _ -> False }
-                        _ -> False
-                      }
-                    })
-                    let affection_ok = d.affection_score >= d.trust_threshold
-                    let output_bonded = any(companion_outputs, fn(o) {
-                      when as_companion_datum(o.datum) is {
-                        Some(newDatum) -> newDatum.bonded == True
-                        _ -> False
-                      }
-                    })
-                    if (nft_consumed || affection_ok) && output_bonded {
-                      True
-                    } else {
-                      fail
-                    }
-                  }
-                }
+                // Bonding: allowed if not bonded AND (NFT consumed OR affection > trust)
+                BondingRitual(ritual) ->
+                  !d.bonded && (
+                    asset_consumed(ctx, d.policy_id, ritual) || d.affection_score >= d.trust_threshold
+                  )
 
-                CosmeticUpgrade(item, modifier) -> {
-                  let unique_items = collect_unique_cosmetic_items(ctx.transaction.inputs)
-                  if length(unique_items) > max_cosmetics_per_tx() {
-                    fail
-                  } else {
-                    let consumed = any(ctx.transaction.inputs, fn(i) {
-                      let m = to_dict(i.output.value)
-                      when get(m, cosmetic_policy_id()) is {
-                        Some(inner) -> when get(inner, item) is { Some(q) -> q >= 1 _ -> False }
-                        _ -> False
-                      }
-                    })
-                    let affection_updated = any(companion_outputs, fn(o) {
-                      when as_companion_datum(o.datum) is {
-                        Some(newDatum) -> {
-                          let next_score = d.affection_score + modifier
-                          let capped = if next_score > max_affection() {
-                            max_affection()
-                          } else if next_score < min_affection() {
-                            min_affection()
-                          } else {
-                            next_score
-                          }
-                          newDatum.affection_score == capped
-                        }
-                        _ -> False
-                      }
-                    })
-                    if consumed && affection_updated { True } else { fail }
-                  }
-                }
+                // Cosmetic upgrade: consume cosmetic NFT
+                CosmeticUpgrade(item) -> asset_consumed(ctx, d.policy_id, item)
 
-                Event(event_id, modifier) -> {
-                  if length(companion_outputs) != 1 {
-                    fail
-                  } else {
-                    let consumed = any(ctx.transaction.inputs, fn(i) {
-                      let m = to_dict(i.output.value)
-                      when get(m, d.policy_id) is {
-                        Some(inner) -> when get(inner, event_id) is { Some(q) -> q >= 1 _ -> False }
-                        _ -> False
-                      }
-                    })
-                    let affection_updated = any(companion_outputs, fn(o) {
-                      when as_companion_datum(o.datum) is {
-                        Some(newDatum) -> {
-                          let next_score = d.affection_score + modifier
-                          let capped = if next_score > max_affection() {
-                            max_affection()
-                          } else if next_score < min_affection() {
-                            min_affection()
-                          } else {
-                            next_score
-                          }
-                          newDatum.affection_score == capped
-                        }
-                        _ -> False
-                      }
-                    })
-                    if consumed && affection_updated { True } else { fail }
-                  }
-                }
-
-                Unbonding(_) -> {
-                  if !d.bonded || length(companion_outputs) != 1 {
-                    fail
-                  } else {
-                    let output_unbonded = any(companion_outputs, fn(o) {
-                      when as_companion_datum(o.datum) is {
-                        Some(newDatum) -> newDatum.bonded == False
-                        _ -> False
-                      }
-                    })
-                    if output_unbonded { True } else { fail }
-                  }
-                }
+                // Unbonding: only if currently bonded
+                Unbonding(_) -> d.bonded
               }
             }
-          }
-          _ -> fail
+          _ -> False
         }
-      }
-      _ -> fail
+      _ -> False
     }
+  }
+
+  else(_) {
+    False
   }
 }
